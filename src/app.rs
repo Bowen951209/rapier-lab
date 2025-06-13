@@ -5,7 +5,6 @@ pub struct AppInfo {
     pub screen_rect: Option<Rect>,
     pub show_fps: bool,
     pub show_grid: bool,
-    pub mouse_dragging: bool,
     pub last_mouse_pos: Option<Pos2>,
 }
 
@@ -15,7 +14,6 @@ impl Default for AppInfo {
             screen_rect: None,
             show_fps: true,
             show_grid: true,
-            mouse_dragging: false,
             last_mouse_pos: None,
         }
     }
@@ -141,28 +139,24 @@ impl eframe::App for PhysicsApp {
         self.app_info.screen_rect = Some(ctx.screen_rect());
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            if self.app_info.show_fps {
+                ui.heading(format!(
+                    "FPS: {}",
+                    self.fps_counter.fps.unwrap_or(0.0).round()
+                ));
+            }
+
             let response = ui.allocate_response(ui.available_size(), egui::Sense::drag());
-            let response = if response.dragged() {
+            if response.dragged() {
                 if let Some(last_pos) = self.app_info.last_mouse_pos {
                     let mut delta = mouse_pos.unwrap() - last_pos;
                     delta.y = -delta.y;
                     self.camera.center += delta / self.camera.zoom;
                 }
 
-                response.on_hover_cursor(egui::CursorIcon::Grabbing)
+                response.on_hover_cursor(egui::CursorIcon::Grabbing);
             } else if response.hovered() {
-                response.on_hover_cursor(egui::CursorIcon::Grab)
-            } else {
-                response
-            };
-
-            self.app_info.mouse_dragging = response.dragged();
-
-            if self.app_info.show_fps {
-                ui.heading(format!(
-                    "FPS: {}",
-                    self.fps_counter.fps.unwrap_or(0.0).round()
-                ));
+                response.on_hover_cursor(egui::CursorIcon::Grab);
             }
 
             self.physics_pipeline.step(
