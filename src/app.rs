@@ -50,6 +50,52 @@ impl PhysicsApp {
 
         Pos2::new(x, y)
     }
+
+    fn draw_grid(&self, painter: &egui::Painter) {
+        let screen_rect = self.app_info.screen_rect.unwrap();
+
+        let center = self.transform_to_screen_pos(self.camera.center.into());
+
+        let mut delta_y = 0.0;
+        while delta_y < screen_rect.height() * 0.5 {
+            let up_y = center.y + delta_y;
+            painter.line_segment(
+                [Pos2::new(0.0, up_y), Pos2::new(screen_rect.width(), up_y)],
+                Stroke::new(0.5, Color32::GRAY),
+            );
+
+            let up_y = center.y - delta_y;
+            painter.line_segment(
+                [Pos2::new(0.0, up_y), Pos2::new(screen_rect.width(), up_y)],
+                Stroke::new(0.5, Color32::GRAY),
+            );
+
+            delta_y += self.camera.zoom;
+        }
+
+        let mut delta_x = 0.0;
+        while delta_x < screen_rect.width() * 0.5 {
+            let right_x = center.x + delta_x;
+            painter.line_segment(
+                [
+                    Pos2::new(right_x, 0.0),
+                    Pos2::new(right_x, screen_rect.height()),
+                ],
+                Stroke::new(0.5, Color32::GRAY),
+            );
+
+            let left_x = center.x - delta_x;
+            painter.line_segment(
+                [
+                    Pos2::new(left_x, 0.0),
+                    Pos2::new(left_x, screen_rect.height()),
+                ],
+                Stroke::new(0.5, Color32::GRAY),
+            );
+
+            delta_x += self.camera.zoom;
+        }
+    }
 }
 
 impl eframe::App for PhysicsApp {
@@ -76,6 +122,7 @@ impl eframe::App for PhysicsApp {
             );
 
             let painter = ui.painter();
+            self.draw_grid(painter);
             for (_body_handle, body) in self.rigid_body_set.iter() {
                 if body.colliders().len() > 1 {
                     panic!("Multiple colliders per body not supported");

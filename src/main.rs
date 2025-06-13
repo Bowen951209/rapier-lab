@@ -27,7 +27,7 @@ fn main() {
 
     let camera = Camera {
         center: Pos2::new(0.0, 0.0),
-        zoom: 10.0,
+        zoom: 100.0,
     };
 
     let app = PhysicsApp {
