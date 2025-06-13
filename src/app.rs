@@ -1,9 +1,20 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke};
 use rapier2d::{na::Vector2, prelude::*};
 
-#[derive(Default)]
 pub struct AppInfo {
     pub screen_rect: Option<Rect>,
+    pub show_fps: bool,
+    pub show_grid: bool,
+}
+
+impl Default for AppInfo {
+    fn default() -> Self {
+        Self {
+            screen_rect: None,
+            show_fps: true,
+            show_grid: true,
+        }
+    }
 }
 
 pub struct Camera {
@@ -27,6 +38,7 @@ pub struct PhysicsApp {
     pub physics_hooks: (),
     pub event_handler: (),
     pub camera: Camera,
+    pub fps_counter: FpsCounter,
     pub app_info: AppInfo,
 }
 
@@ -96,14 +108,31 @@ impl PhysicsApp {
             delta_x += self.camera.zoom;
         }
     }
+
+    fn draw_windows(&mut self, ctx: &egui::Context) {
+        egui::Window::new("Debug Panel")
+            .resizable(true)
+            .collapsible(true)
+            .show(ctx, |ui| {
+                ui.checkbox(&mut self.app_info.show_fps, "Show FPS");
+                ui.checkbox(&mut self.app_info.show_grid, "Show Grid");
+            });
+    }
 }
 
 impl eframe::App for PhysicsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let time = ctx.input(|input| input.time);
+        self.fps_counter.update_frame(time);
         self.app_info.screen_rect = Some(ctx.screen_rect());
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello World!");
+            if self.app_info.show_fps {
+                ui.heading(format!(
+                    "FPS: {}",
+                    self.fps_counter.fps.unwrap_or(0.0).round()
+                ));
+            }
 
             self.physics_pipeline.step(
                 &self.gravity,
@@ -122,7 +151,10 @@ impl eframe::App for PhysicsApp {
             );
 
             let painter = ui.painter();
-            self.draw_grid(painter);
+            if self.app_info.show_grid {
+                self.draw_grid(painter);
+            }
+
             for (_body_handle, body) in self.rigid_body_set.iter() {
                 if body.colliders().len() > 1 {
                     panic!("Multiple colliders per body not supported");
@@ -171,6 +203,33 @@ impl eframe::App for PhysicsApp {
             }
         });
 
+        self.draw_windows(ctx);
+
         ctx.request_repaint();
+    }
+}
+
+#[derive(Default)]
+pub struct FpsCounter {
+    last_time: Option<f64>,
+    frame_count: usize,
+    fps: Option<f32>,
+}
+
+impl FpsCounter {
+    fn update_frame(&mut self, current_time: f64) {
+        self.frame_count += 1;
+
+        match self.last_time {
+            Some(last_time) => {
+                let delta_time = current_time - last_time;
+                if delta_time > 1.0 {
+                    self.fps = Some((self.frame_count as f64 / delta_time) as f32);
+                    self.frame_count = 0;
+                    self.last_time = Some(current_time);
+                }
+            }
+            None => self.last_time = Some(current_time),
+        }
     }
 }

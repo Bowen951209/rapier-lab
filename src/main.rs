@@ -3,7 +3,7 @@ mod app;
 use eframe::egui::Pos2;
 use rapier2d::prelude::*;
 
-use crate::app::{AppInfo, Camera, PhysicsApp};
+use crate::app::{AppInfo, Camera, FpsCounter, PhysicsApp};
 
 fn main() {
     let mut rigid_body_set = RigidBodySet::new();
@@ -47,6 +47,7 @@ fn main() {
         physics_hooks: (),
         event_handler: (),
         app_info: AppInfo::default(),
+        fps_counter: FpsCounter::default(),
     };
 
     app.run("Rapier Lab").expect("Failed to run the frame");
