@@ -147,7 +147,7 @@ impl eframe::App for PhysicsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.app_info.show_fps {
                 ui.heading(format!(
-                    "FPS: {}\nCamera Zoom: {:.2}",
+                    "FPS: {}\nCamera Zoom: x{:.2}",
                     self.fps_counter.fps.unwrap_or(0.0).round(),
                     self.camera.zoom
                 ));
@@ -164,8 +164,8 @@ impl eframe::App for PhysicsApp {
                 response.on_hover_cursor(egui::CursorIcon::Grabbing);
             } else if response.hovered() {
                 response.on_hover_cursor(egui::CursorIcon::Grab);
-                const ZOOM_SPEED: f32 = 0.1;
-                self.camera.zoom *= 1.1f32.powf(mouse_scroll_delta * ZOOM_SPEED);
+                const ZOOM_SPEED: f32 = 0.01;
+                self.camera.zoom *= (mouse_scroll_delta * ZOOM_SPEED).exp();
                 if self.camera.zoom < 1.0 {
                     self.camera.zoom = 1.0;
                 }
