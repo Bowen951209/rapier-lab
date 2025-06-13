@@ -134,15 +134,22 @@ impl PhysicsApp {
 
 impl eframe::App for PhysicsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let (time, mouse_pos) = ctx.input(|input| (input.time, input.pointer.hover_pos()));
+        let (time, mouse_pos, mouse_scroll_delta) = ctx.input(|input| {
+            (
+                input.time,
+                input.pointer.hover_pos(),
+                input.smooth_scroll_delta.y,
+            )
+        });
         self.fps_counter.update_frame(time);
         self.app_info.screen_rect = Some(ctx.screen_rect());
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.app_info.show_fps {
                 ui.heading(format!(
-                    "FPS: {}",
-                    self.fps_counter.fps.unwrap_or(0.0).round()
+                    "FPS: {}\nCamera Zoom: {:.2}",
+                    self.fps_counter.fps.unwrap_or(0.0).round(),
+                    self.camera.zoom
                 ));
             }
 
@@ -157,6 +164,11 @@ impl eframe::App for PhysicsApp {
                 response.on_hover_cursor(egui::CursorIcon::Grabbing);
             } else if response.hovered() {
                 response.on_hover_cursor(egui::CursorIcon::Grab);
+                const ZOOM_SPEED: f32 = 0.1;
+                self.camera.zoom *= 1.1f32.powf(mouse_scroll_delta * ZOOM_SPEED);
+                if self.camera.zoom < 1.0 {
+                    self.camera.zoom = 1.0;
+                }
             }
 
             self.physics_pipeline.step(
