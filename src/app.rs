@@ -5,6 +5,8 @@ pub struct AppInfo {
     pub screen_rect: Option<Rect>,
     pub show_fps: bool,
     pub show_grid: bool,
+    pub mouse_dragging: bool,
+    pub last_mouse_pos: Option<Pos2>,
 }
 
 impl Default for AppInfo {
@@ -13,6 +15,8 @@ impl Default for AppInfo {
             screen_rect: None,
             show_fps: true,
             show_grid: true,
+            mouse_dragging: false,
+            last_mouse_pos: None,
         }
     }
 }
@@ -48,7 +52,7 @@ impl PhysicsApp {
         eframe::run_native(app_name, native_options, Box::new(|_cc| Ok(Box::new(self))))
     }
 
-    pub fn transform_to_screen_pos(&self, p: (f32, f32)) -> Pos2 {
+    pub fn world_to_screen(&self, p: (f32, f32)) -> Pos2 {
         let (mut x, mut y) = (p.0, p.1);
         let screen_rect = self.app_info.screen_rect.unwrap();
 
@@ -63,49 +67,59 @@ impl PhysicsApp {
         Pos2::new(x, y)
     }
 
-    fn draw_grid(&self, painter: &egui::Painter) {
+    pub fn screen_to_world(&self, p: Pos2) -> (f32, f32) {
+        let (mut x, mut y) = (p.x, p.y);
         let screen_rect = self.app_info.screen_rect.unwrap();
 
-        let center = self.transform_to_screen_pos(self.camera.center.into());
+        x -= screen_rect.width() * 0.5;
+        x /= self.camera.zoom;
+        x -= self.camera.center.x;
 
-        let mut delta_y = 0.0;
-        while delta_y < screen_rect.height() * 0.5 {
-            let up_y = center.y + delta_y;
+        y -= screen_rect.height() * 0.5;
+        y /= -self.camera.zoom;
+        y -= self.camera.center.y;
+
+        (x, y)
+    }
+
+    fn draw_grid(&self, painter: &egui::Painter) {
+        let grid_spacing_world = 1.0;
+        let zoom = self.camera.zoom;
+        let screen_rect = self.app_info.screen_rect.unwrap();
+
+        // Screen corners to world space
+        let (top_left_world_x, top_left_world_y) = self.screen_to_world(screen_rect.min);
+        let (bottom_right_world_x, bottom_right_world_y) = self.screen_to_world(screen_rect.max);
+
+        // Find start position (start from the nearest integer multiple)
+        let start_x = (top_left_world_x / grid_spacing_world).floor() * grid_spacing_world;
+        let end_x = (bottom_right_world_x / grid_spacing_world).ceil() * grid_spacing_world;
+        let start_y = (bottom_right_world_y / grid_spacing_world).floor() * grid_spacing_world;
+        let end_y = (top_left_world_y / grid_spacing_world).ceil() * grid_spacing_world;
+
+        // Draw vertical lines
+        for x in (start_x as i32..=end_x as i32).step_by(grid_spacing_world as usize) {
+            // world -> screen
+            let sx = (x as f32 + self.camera.center.x) * zoom + screen_rect.center().x;
             painter.line_segment(
-                [Pos2::new(0.0, up_y), Pos2::new(screen_rect.width(), up_y)],
-                Stroke::new(0.5, Color32::GRAY),
+                [
+                    egui::pos2(sx, screen_rect.top()),
+                    egui::pos2(sx, screen_rect.bottom()),
+                ],
+                (1.0, egui::Color32::LIGHT_GRAY),
             );
-
-            let up_y = center.y - delta_y;
-            painter.line_segment(
-                [Pos2::new(0.0, up_y), Pos2::new(screen_rect.width(), up_y)],
-                Stroke::new(0.5, Color32::GRAY),
-            );
-
-            delta_y += self.camera.zoom;
         }
 
-        let mut delta_x = 0.0;
-        while delta_x < screen_rect.width() * 0.5 {
-            let right_x = center.x + delta_x;
+        // Draw horizontal lines
+        for y in (start_y as i32..=end_y as i32).step_by(grid_spacing_world as usize) {
+            let sy = screen_rect.center().y - (y as f32 + self.camera.center.y) * zoom;
             painter.line_segment(
                 [
-                    Pos2::new(right_x, 0.0),
-                    Pos2::new(right_x, screen_rect.height()),
+                    egui::pos2(screen_rect.left(), sy),
+                    egui::pos2(screen_rect.right(), sy),
                 ],
-                Stroke::new(0.5, Color32::GRAY),
+                (1.0, egui::Color32::LIGHT_GRAY),
             );
-
-            let left_x = center.x - delta_x;
-            painter.line_segment(
-                [
-                    Pos2::new(left_x, 0.0),
-                    Pos2::new(left_x, screen_rect.height()),
-                ],
-                Stroke::new(0.5, Color32::GRAY),
-            );
-
-            delta_x += self.camera.zoom;
         }
     }
 
@@ -122,11 +136,28 @@ impl PhysicsApp {
 
 impl eframe::App for PhysicsApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let time = ctx.input(|input| input.time);
+        let (time, mouse_pos) = ctx.input(|input| (input.time, input.pointer.hover_pos()));
         self.fps_counter.update_frame(time);
         self.app_info.screen_rect = Some(ctx.screen_rect());
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            let response = ui.allocate_response(ui.available_size(), egui::Sense::drag());
+            let response = if response.dragged() {
+                if let Some(last_pos) = self.app_info.last_mouse_pos {
+                    let mut delta = mouse_pos.unwrap() - last_pos;
+                    delta.y = -delta.y;
+                    self.camera.center += delta / self.camera.zoom;
+                }
+
+                response.on_hover_cursor(egui::CursorIcon::Grabbing)
+            } else if response.hovered() {
+                response.on_hover_cursor(egui::CursorIcon::Grab)
+            } else {
+                response
+            };
+
+            self.app_info.mouse_dragging = response.dragged();
+
             if self.app_info.show_fps {
                 ui.heading(format!(
                     "FPS: {}",
@@ -163,8 +194,7 @@ impl eframe::App for PhysicsApp {
                 let collider = self.collider_set.get(body.colliders()[0]).unwrap();
                 let shape = collider.shape().as_typed_shape();
                 let position = collider.position();
-                let center =
-                    self.transform_to_screen_pos((position.translation.x, position.translation.y));
+                let center = self.world_to_screen((position.translation.x, position.translation.y));
 
                 match shape {
                     TypedShape::Ball(ball) => {
@@ -172,7 +202,7 @@ impl eframe::App for PhysicsApp {
                         painter.circle(center, radius, Color32::BLUE, Stroke::NONE);
 
                         let line_end = position * point![ball.radius, 0.0];
-                        let line_end = self.transform_to_screen_pos((line_end.x, line_end.y));
+                        let line_end = self.world_to_screen((line_end.x, line_end.y));
                         painter.line_segment([center, line_end], Stroke::new(1.0, Color32::WHITE));
                     }
                     TypedShape::Cuboid(cuboid) => {
@@ -183,7 +213,7 @@ impl eframe::App for PhysicsApp {
                             position * point!(-cuboid.half_extents.x, cuboid.half_extents.y),
                         ]
                         .iter()
-                        .map(|v| self.transform_to_screen_pos((v.x, v.y)))
+                        .map(|v| self.world_to_screen((v.x, v.y)))
                         .collect::<Vec<_>>();
 
                         let up_right = vertices[2];
@@ -204,6 +234,8 @@ impl eframe::App for PhysicsApp {
         });
 
         self.draw_windows(ctx);
+
+        self.app_info.last_mouse_pos = mouse_pos;
 
         ctx.request_repaint();
     }
