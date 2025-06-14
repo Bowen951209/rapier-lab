@@ -207,6 +207,20 @@ impl PhysicsApp {
                 .open(is_open)
                 .show(ctx, |ui| {
                     let body = self.rigid_body_set.get(*body_handle).unwrap();
+                    ui.label(format!(
+                        "Position: ({:.2}, {:.2})",
+                        body.translation().x,
+                        body.translation().y
+                    ));
+                    ui.label(format!("Angle: {}", body.rotation().angle()));
+                    ui.label(format!("Mass: {}", body.mass()));
+                    ui.label(format!(
+                        "Linear Velocity: ({:.2}, {:.2}), Magnitude: {:.2}",
+                        body.linvel().x,
+                        body.linvel().y,
+                        body.linvel().magnitude()
+                    ));
+
                     let colliders = body
                         .colliders()
                         .iter()
@@ -225,6 +239,7 @@ impl PhysicsApp {
                                             collider.translation().x,
                                             collider.translation().y
                                         ));
+                                        ui.label(format!("Angle: {}", collider.rotation().angle()));
                                         ui.label(format!("Mass: {}", collider.mass()));
                                         ui.label(format!(
                                             "Restitution: {}",
