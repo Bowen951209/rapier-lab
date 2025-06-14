@@ -3,6 +3,12 @@ use std::collections::HashMap;
 use eframe::egui;
 use rapier2d::{na, prelude::*};
 
+pub enum SimulationMode {
+    Playing,
+    Pause,
+    StepOneFrame,
+}
+
 pub struct AppInfo {
     pub screen_rect: Option<egui::Rect>,
     pub show_fps: bool,
@@ -14,6 +20,7 @@ pub struct AppInfo {
     /// Note that this map will get larger and larger as users opened many windows even if
     /// they closed them afterwards.
     pub body_window_open_states: HashMap<RigidBodyHandle, bool>,
+    pub simulation_mode: SimulationMode,
 }
 
 impl Default for AppInfo {
@@ -26,6 +33,7 @@ impl Default for AppInfo {
             grid_space: None,
             hovered_body: None,
             body_window_open_states: HashMap::new(),
+            simulation_mode: SimulationMode::Pause,
         }
     }
 }
@@ -111,6 +119,24 @@ impl PhysicsApp {
         }
     }
 
+    pub fn step_physics(&mut self) {
+        self.physics_pipeline.step(
+            &self.gravity,
+            &self.integration_parameters,
+            &mut self.island_manager,
+            &mut self.broad_phase,
+            &mut self.narrow_phase,
+            &mut self.rigid_body_set,
+            &mut self.collider_set,
+            &mut self.impulse_joint_set,
+            &mut self.multibody_joint_set,
+            &mut self.ccd_solver,
+            Some(&mut self.query_pipeline),
+            &self.physics_hooks,
+            &self.event_handler,
+        );
+    }
+
     fn mouse_hover_body(&self, mouse_pos: egui::Pos2) -> Option<RigidBodyHandle> {
         let world_pos = self.screen_to_world(mouse_pos);
         let world_pos = point![world_pos.0, world_pos.1];
@@ -193,6 +219,13 @@ impl PhysicsApp {
             .show(ctx, |ui| {
                 ui.checkbox(&mut self.app_info.show_fps, "Show FPS");
                 ui.checkbox(&mut self.app_info.show_grid, "Show Grid");
+                if ui.button("Play").clicked() {
+                    self.app_info.simulation_mode = SimulationMode::Playing;
+                } else if ui.button("Pause").clicked() {
+                    self.app_info.simulation_mode = SimulationMode::Pause;
+                } else if ui.button("Step").clicked() {
+                    self.app_info.simulation_mode = SimulationMode::StepOneFrame;
+                }
             });
 
         // Body Monitors
@@ -283,6 +316,20 @@ impl eframe::App for PhysicsApp {
             self.camera.zoom = 1.0;
         }
 
+        // Step the physics
+        let should_update_next_frame = match self.app_info.simulation_mode {
+            SimulationMode::Playing => {
+                self.step_physics();
+                true
+            }
+            SimulationMode::StepOneFrame => {
+                self.step_physics();
+                self.app_info.simulation_mode = SimulationMode::Pause; // Pause after one frame
+                false
+            }
+            SimulationMode::Pause => false,
+        };
+
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.app_info.show_fps {
                 ui.heading(format!(
@@ -325,23 +372,6 @@ impl eframe::App for PhysicsApp {
                 }
             }
             response.on_hover_cursor(cursor_icon);
-
-            // Step the physics.
-            self.physics_pipeline.step(
-                &self.gravity,
-                &self.integration_parameters,
-                &mut self.island_manager,
-                &mut self.broad_phase,
-                &mut self.narrow_phase,
-                &mut self.rigid_body_set,
-                &mut self.collider_set,
-                &mut self.impulse_joint_set,
-                &mut self.multibody_joint_set,
-                &mut self.ccd_solver,
-                Some(&mut self.query_pipeline),
-                &self.physics_hooks,
-                &self.event_handler,
-            );
 
             // Draw the world.
             let painter = ui.painter();
@@ -406,7 +436,9 @@ impl eframe::App for PhysicsApp {
 
         self.app_info.last_mouse_pos = mouse_pos;
 
-        ctx.request_repaint(); // make it a loop
+        if should_update_next_frame {
+            ctx.request_repaint(); // make it a loop
+        }
     }
 }
 
