@@ -6,6 +6,7 @@ pub struct AppInfo {
     pub show_fps: bool,
     pub show_grid: bool,
     pub last_mouse_pos: Option<Pos2>,
+    pub grid_space: Option<f32>,
 }
 
 impl Default for AppInfo {
@@ -15,6 +16,7 @@ impl Default for AppInfo {
             show_fps: true,
             show_grid: true,
             last_mouse_pos: None,
+            grid_space: None,
         }
     }
 }
@@ -50,19 +52,18 @@ impl PhysicsApp {
         eframe::run_native(app_name, native_options, Box::new(|_cc| Ok(Box::new(self))))
     }
 
-    pub fn world_to_screen(&self, p: (f32, f32)) -> Pos2 {
-        let (mut x, mut y) = (p.0, p.1);
+    pub fn world_to_screen_x(&self, x: f32) -> f32 {
         let screen_rect = self.app_info.screen_rect.unwrap();
+        (x + self.camera.center.x) * self.camera.zoom + screen_rect.width() * 0.5
+    }
 
-        x += self.camera.center.x;
-        x *= self.camera.zoom;
-        x += screen_rect.width() * 0.5;
+    pub fn world_to_screen_y(&self, y: f32) -> f32 {
+        let screen_rect = self.app_info.screen_rect.unwrap();
+        (y + self.camera.center.y) * -self.camera.zoom + screen_rect.height() * 0.5
+    }
 
-        y += self.camera.center.y;
-        y *= -self.camera.zoom;
-        y += screen_rect.height() * 0.5;
-
-        Pos2::new(x, y)
+    pub fn world_to_screen(&self, p: (f32, f32)) -> Pos2 {
+        Pos2::new(self.world_to_screen_x(p.0), self.world_to_screen_y(p.1))
     }
 
     pub fn screen_to_world(&self, p: Pos2) -> (f32, f32) {
@@ -80,44 +81,49 @@ impl PhysicsApp {
         (x, y)
     }
 
-    fn draw_grid(&self, painter: &egui::Painter) {
-        let grid_spacing_world = 1.0;
-        let zoom = self.camera.zoom;
+    fn draw_grid(&mut self, painter: &egui::Painter) {
+        const GRID_SPACE_FREQ: f32 = 2.0;
+        let grid_spacing_world = 10f32
+            .powf(-GRID_SPACE_FREQ * (self.camera.zoom.log10() - 2.0).round() / GRID_SPACE_FREQ);
+        self.app_info.grid_space = Some(grid_spacing_world);
         let screen_rect = self.app_info.screen_rect.unwrap();
 
         // Screen corners to world space
-        let (top_left_world_x, top_left_world_y) = self.screen_to_world(screen_rect.min);
-        let (bottom_right_world_x, bottom_right_world_y) = self.screen_to_world(screen_rect.max);
+        let (min_world_x, min_world_y) = self.screen_to_world(screen_rect.min);
+        let (max_world_x, max_world_y) = self.screen_to_world(screen_rect.max);
 
         // Find start position (start from the nearest integer multiple)
-        let start_x = (top_left_world_x / grid_spacing_world).floor() * grid_spacing_world;
-        let end_x = (bottom_right_world_x / grid_spacing_world).ceil() * grid_spacing_world;
-        let start_y = (bottom_right_world_y / grid_spacing_world).floor() * grid_spacing_world;
-        let end_y = (top_left_world_y / grid_spacing_world).ceil() * grid_spacing_world;
+        let start_x = (min_world_x / grid_spacing_world).floor() * grid_spacing_world;
+        let end_x = (max_world_x / grid_spacing_world).ceil() * grid_spacing_world;
+        let start_y = (max_world_y / grid_spacing_world).floor() * grid_spacing_world;
+        let end_y = (min_world_y / grid_spacing_world).ceil() * grid_spacing_world;
 
         // Draw vertical lines
-        for x in (start_x as i32..=end_x as i32).step_by(grid_spacing_world as usize) {
-            // world -> screen
-            let sx = (x as f32 + self.camera.center.x) * zoom + screen_rect.center().x;
+        let mut x = start_x;
+        while x < end_x {
+            let screen_x = self.world_to_screen_x(x);
             painter.line_segment(
                 [
-                    egui::pos2(sx, screen_rect.top()),
-                    egui::pos2(sx, screen_rect.bottom()),
+                    egui::pos2(screen_x, screen_rect.top()),
+                    egui::pos2(screen_x, screen_rect.bottom()),
                 ],
                 (1.0, egui::Color32::LIGHT_GRAY),
             );
+            x += grid_spacing_world;
         }
 
         // Draw horizontal lines
-        for y in (start_y as i32..=end_y as i32).step_by(grid_spacing_world as usize) {
-            let sy = screen_rect.center().y - (y as f32 + self.camera.center.y) * zoom;
+        let mut y = start_y;
+        while y < end_y {
+            let screen_y = self.world_to_screen_y(y);
             painter.line_segment(
                 [
-                    egui::pos2(screen_rect.left(), sy),
-                    egui::pos2(screen_rect.right(), sy),
+                    egui::pos2(screen_rect.left(), screen_y),
+                    egui::pos2(screen_rect.right(), screen_y),
                 ],
                 (1.0, egui::Color32::LIGHT_GRAY),
             );
+            y += grid_spacing_world;
         }
     }
 
@@ -147,9 +153,12 @@ impl eframe::App for PhysicsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.app_info.show_fps {
                 ui.heading(format!(
-                    "FPS: {}\nCamera Zoom: x{:.2}",
+                    "FPS: {}\n\
+                    Camera Zoom: x{:.2}\n\
+                    Grid Space: {:.2}",
                     self.fps_counter.fps.unwrap_or(0.0).round(),
-                    self.camera.zoom
+                    self.camera.zoom,
+                    self.app_info.grid_space.unwrap_or(0.0)
                 ));
             }
 
