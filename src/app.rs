@@ -1,4 +1,4 @@
-use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke};
+use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, vec2};
 use rapier2d::{na::Vector2, prelude::*};
 
 pub struct AppInfo {
@@ -129,8 +129,13 @@ impl PhysicsApp {
 
     fn draw_windows(&mut self, ctx: &egui::Context) {
         egui::Window::new("Debug Panel")
+            .default_pos({
+                let screen_rect = self.app_info.screen_rect.unwrap();
+                screen_rect.right_top()
+            })
             .resizable(true)
             .collapsible(true)
+            .default_size(vec2(200.0, 100.0))
             .show(ctx, |ui| {
                 ui.checkbox(&mut self.app_info.show_fps, "Show FPS");
                 ui.checkbox(&mut self.app_info.show_grid, "Show Grid");
