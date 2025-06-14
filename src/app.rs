@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use eframe::egui;
 use rapier2d::{na, prelude::*};
 
@@ -7,6 +9,11 @@ pub struct AppInfo {
     pub show_grid: bool,
     pub last_mouse_pos: Option<egui::Pos2>,
     pub grid_space: Option<f32>,
+    pub hovered_body: Option<RigidBodyHandle>,
+    /// The HashMap between rigid body handles and whether the corresponding window is open.
+    /// Note that this map will get larger and larger as users opened many windows even if
+    /// they closed them afterwards.
+    pub body_window_open_states: HashMap<RigidBodyHandle, bool>,
 }
 
 impl Default for AppInfo {
@@ -17,6 +24,8 @@ impl Default for AppInfo {
             show_grid: true,
             last_mouse_pos: None,
             grid_space: None,
+            hovered_body: None,
+            body_window_open_states: HashMap::new(),
         }
     }
 }
@@ -81,6 +90,51 @@ impl PhysicsApp {
         (x, y)
     }
 
+    pub fn shape_type_to_str(typed_shape: TypedShape) -> &'static str {
+        match typed_shape {
+            TypedShape::Ball(_) => "Ball",
+            TypedShape::Cuboid(_) => "Cuboid",
+            TypedShape::Capsule(_) => "Capsule",
+            TypedShape::Segment(_) => "Segment",
+            TypedShape::Triangle(_) => "Triangle",
+            TypedShape::Voxels(_) => "Voxels",
+            TypedShape::TriMesh(_) => "TriMesh",
+            TypedShape::Polyline(_) => "Polyline",
+            TypedShape::HalfSpace(_) => "HalfSpace",
+            TypedShape::HeightField(_) => "HeightField",
+            TypedShape::Compound(_) => "Compound",
+            TypedShape::ConvexPolygon(_) => "ConvexPolygon",
+            TypedShape::RoundCuboid(_) => "RoundCuboid",
+            TypedShape::RoundTriangle(_) => "RoundTriangle",
+            TypedShape::RoundConvexPolygon(_) => "RoundConvexPolygon",
+            TypedShape::Custom(_) => "Custom",
+        }
+    }
+
+    fn mouse_hover_body(&self, mouse_pos: egui::Pos2) -> Option<RigidBodyHandle> {
+        let world_pos = self.screen_to_world(mouse_pos);
+        let world_pos = point![world_pos.0, world_pos.1];
+        let filter = QueryFilter::new();
+
+        let mut body_handle = None;
+
+        self.query_pipeline.intersections_with_point(
+            &self.rigid_body_set,
+            &self.collider_set,
+            &world_pos,
+            filter,
+            |handle| {
+                let collider = self.collider_set.get(handle).unwrap();
+                body_handle = collider.parent();
+
+                // We only find first body, return false to stop searching
+                false
+            },
+        );
+
+        body_handle
+    }
+
     fn draw_grid(&mut self, painter: &egui::Painter) {
         const GRID_SPACE_FREQ: f32 = 2.0;
         let grid_spacing_world = 10f32
@@ -128,18 +182,66 @@ impl PhysicsApp {
     }
 
     fn draw_windows(&mut self, ctx: &egui::Context) {
+        // Debug Panel
         egui::Window::new("Debug Panel")
             .default_pos({
                 let screen_rect = self.app_info.screen_rect.unwrap();
                 screen_rect.right_top()
             })
-            .resizable(true)
             .collapsible(true)
             .default_size(egui::vec2(200.0, 100.0))
             .show(ctx, |ui| {
                 ui.checkbox(&mut self.app_info.show_fps, "Show FPS");
                 ui.checkbox(&mut self.app_info.show_grid, "Show Grid");
             });
+
+        // Body Monitors
+        for (body_handle, is_open) in &mut self.app_info.body_window_open_states {
+            if !*is_open {
+                continue;
+            }
+
+            let body_index = body_handle.into_raw_parts().0;
+            egui::Window::new(format!("Body index {}", body_index))
+                .collapsible(true)
+                .open(is_open)
+                .show(ctx, |ui| {
+                    let body = self.rigid_body_set.get(*body_handle).unwrap();
+                    let colliders = body
+                        .colliders()
+                        .iter()
+                        .map(|handle| self.collider_set.get(*handle).unwrap())
+                        .collect::<Vec<_>>();
+
+                    egui::CollapsingHeader::new("Colliders")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            for (i, collider) in colliders.iter().enumerate() {
+                                egui::CollapsingHeader::new(format!("Collider {}", i))
+                                    .default_open(true)
+                                    .show(ui, |ui| {
+                                        ui.label(format!(
+                                            "Position: ({:.2}, {:.2})",
+                                            collider.translation().x,
+                                            collider.translation().y
+                                        ));
+                                        ui.label(format!("Mass: {}", collider.mass()));
+                                        ui.label(format!(
+                                            "Restitution: {}",
+                                            collider.restitution()
+                                        ));
+                                        ui.label(format!("Friction: {}", collider.friction()));
+                                        ui.label(format!(
+                                            "Shape: {}",
+                                            Self::shape_type_to_str(
+                                                collider.shape().as_typed_shape()
+                                            )
+                                        ));
+                                    });
+                            }
+                        });
+                });
+        }
     }
 }
 
@@ -154,6 +256,17 @@ impl eframe::App for PhysicsApp {
         });
         self.fps_counter.update_frame(time);
         self.app_info.screen_rect = Some(ctx.screen_rect());
+        if let Some(mouse_pos) = mouse_pos {
+            self.app_info.hovered_body = self.mouse_hover_body(mouse_pos);
+        }
+
+        // Zoom the camera when mouse wheel is scrolled.
+        // Use a exponetial increment to make it feel more natural.
+        const ZOOM_SPEED: f32 = 0.01;
+        self.camera.zoom *= (mouse_scroll_delta * ZOOM_SPEED).exp();
+        if self.camera.zoom < 1.0 {
+            self.camera.zoom = 1.0;
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if self.app_info.show_fps {
@@ -163,28 +276,42 @@ impl eframe::App for PhysicsApp {
                     Grid Space: {:.2}",
                     self.fps_counter.fps.unwrap_or(0.0).round(),
                     self.camera.zoom,
-                    self.app_info.grid_space.unwrap_or(0.0)
+                    self.app_info.grid_space.unwrap_or(0.0),
                 ));
             }
 
-            let response = ui.allocate_response(ui.available_size(), egui::Sense::drag());
+            // Mouse response.
+            // Will trigger only when mouse is in the canvas.
+            // Mouse on the UI will not trigger this.
+            let response = ui.allocate_response(ui.available_size(), egui::Sense::click_and_drag());
+            let mut cursor_icon = egui::CursorIcon::Default;
             if response.dragged() {
+                // If mouse is dragged, move the camera and set icon to Grabbing.
                 if let Some(last_pos) = self.app_info.last_mouse_pos {
                     let mut delta = mouse_pos.unwrap() - last_pos;
                     delta.y = -delta.y;
                     self.camera.center += delta / self.camera.zoom;
                 }
 
-                response.on_hover_cursor(egui::CursorIcon::Grabbing);
+                cursor_icon = egui::CursorIcon::Grabbing;
             } else if response.hovered() {
-                response.on_hover_cursor(egui::CursorIcon::Grab);
-                const ZOOM_SPEED: f32 = 0.01;
-                self.camera.zoom *= (mouse_scroll_delta * ZOOM_SPEED).exp();
-                if self.camera.zoom < 1.0 {
-                    self.camera.zoom = 1.0;
+                if self.app_info.hovered_body.is_some() {
+                    // If mouse is hovering on a body, set icon to PointingHand.
+                    cursor_icon = egui::CursorIcon::PointingHand;
+                } else {
+                    // If mouse is hovering on the canvas, set icon to Grab.
+                    cursor_icon = egui::CursorIcon::Grab;
                 }
             }
+            if response.clicked_by(egui::PointerButton::Primary) {
+                // If a body is selected, open its window.
+                if let Some(body) = self.app_info.hovered_body {
+                    self.app_info.body_window_open_states.insert(body, true);
+                }
+            }
+            response.on_hover_cursor(cursor_icon);
 
+            // Step the physics.
             self.physics_pipeline.step(
                 &self.gravity,
                 &self.integration_parameters,
@@ -201,6 +328,7 @@ impl eframe::App for PhysicsApp {
                 &self.event_handler,
             );
 
+            // Draw the world.
             let painter = ui.painter();
             if self.app_info.show_grid {
                 self.draw_grid(painter);
@@ -263,7 +391,7 @@ impl eframe::App for PhysicsApp {
 
         self.app_info.last_mouse_pos = mouse_pos;
 
-        ctx.request_repaint();
+        ctx.request_repaint(); // make it a loop
     }
 }
 
