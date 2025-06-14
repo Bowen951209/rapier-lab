@@ -1,11 +1,11 @@
-use eframe::egui::{self, Color32, Pos2, Rect, Shape, Stroke, vec2};
-use rapier2d::{na::Vector2, prelude::*};
+use eframe::egui;
+use rapier2d::{na, prelude::*};
 
 pub struct AppInfo {
-    pub screen_rect: Option<Rect>,
+    pub screen_rect: Option<egui::Rect>,
     pub show_fps: bool,
     pub show_grid: bool,
-    pub last_mouse_pos: Option<Pos2>,
+    pub last_mouse_pos: Option<egui::Pos2>,
     pub grid_space: Option<f32>,
 }
 
@@ -22,7 +22,7 @@ impl Default for AppInfo {
 }
 
 pub struct Camera {
-    pub center: Pos2,
+    pub center: egui::Pos2,
     pub zoom: f32,
 }
 
@@ -30,7 +30,7 @@ pub struct PhysicsApp {
     pub rigid_body_set: RigidBodySet,
     pub collider_set: ColliderSet,
     pub physics_pipeline: PhysicsPipeline,
-    pub gravity: Vector2<Real>,
+    pub gravity: na::Vector2<Real>,
     pub integration_parameters: IntegrationParameters,
     pub island_manager: IslandManager,
     pub broad_phase: DefaultBroadPhase,
@@ -62,11 +62,11 @@ impl PhysicsApp {
         (y + self.camera.center.y) * -self.camera.zoom + screen_rect.height() * 0.5
     }
 
-    pub fn world_to_screen(&self, p: (f32, f32)) -> Pos2 {
-        Pos2::new(self.world_to_screen_x(p.0), self.world_to_screen_y(p.1))
+    pub fn world_to_screen(&self, p: (f32, f32)) -> egui::Pos2 {
+        egui::Pos2::new(self.world_to_screen_x(p.0), self.world_to_screen_y(p.1))
     }
 
-    pub fn screen_to_world(&self, p: Pos2) -> (f32, f32) {
+    pub fn screen_to_world(&self, p: egui::Pos2) -> (f32, f32) {
         let (mut x, mut y) = (p.x, p.y);
         let screen_rect = self.app_info.screen_rect.unwrap();
 
@@ -135,7 +135,7 @@ impl PhysicsApp {
             })
             .resizable(true)
             .collapsible(true)
-            .default_size(vec2(200.0, 100.0))
+            .default_size(egui::vec2(200.0, 100.0))
             .show(ctx, |ui| {
                 ui.checkbox(&mut self.app_info.show_fps, "Show FPS");
                 ui.checkbox(&mut self.app_info.show_grid, "Show Grid");
@@ -219,11 +219,14 @@ impl eframe::App for PhysicsApp {
                 match shape {
                     TypedShape::Ball(ball) => {
                         let radius = ball.radius * self.camera.zoom;
-                        painter.circle(center, radius, Color32::BLUE, Stroke::NONE);
+                        painter.circle(center, radius, egui::Color32::BLUE, egui::Stroke::NONE);
 
                         let line_end = position * point![ball.radius, 0.0];
                         let line_end = self.world_to_screen((line_end.x, line_end.y));
-                        painter.line_segment([center, line_end], Stroke::new(1.0, Color32::WHITE));
+                        painter.line_segment(
+                            [center, line_end],
+                            egui::Stroke::new(1.0, egui::Color32::WHITE),
+                        );
                     }
                     TypedShape::Cuboid(cuboid) => {
                         let vertices = [
@@ -238,13 +241,16 @@ impl eframe::App for PhysicsApp {
 
                         let up_right = vertices[2];
 
-                        painter.add(Shape::convex_polygon(
+                        painter.add(egui::Shape::convex_polygon(
                             vertices,
-                            Color32::ORANGE,
-                            Stroke::NONE,
+                            egui::Color32::ORANGE,
+                            egui::Stroke::NONE,
                         ));
 
-                        painter.line_segment([center, up_right], Stroke::new(1.0, Color32::WHITE));
+                        painter.line_segment(
+                            [center, up_right],
+                            egui::Stroke::new(1.0, egui::Color32::WHITE),
+                        );
                     }
                     _ => {
                         panic!("Unsupported shape");

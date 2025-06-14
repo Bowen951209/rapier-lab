@@ -13,15 +13,15 @@ fn main() {
     let rigid_body = RigidBodyBuilder::fixed()
         .translation(vector![0.0, 0.0])
         .build();
-    let collider = ColliderBuilder::cuboid(5.0, 1.0).build();
+    let collider = ColliderBuilder::cuboid(5.0, 1.0).restitution(1.0).build();
     let rigid_body_handle = rigid_body_set.insert(rigid_body);
     collider_set.insert_with_parent(collider, rigid_body_handle, &mut rigid_body_set);
 
     /* Create the bouncing ball. */
     let rigid_body = RigidBodyBuilder::dynamic()
-        .translation(vector![0.0, 10.0])
+        .translation(vector![0.0, 2.0])
         .build();
-    let collider = ColliderBuilder::ball(0.5).restitution(0.7).build();
+    let collider = ColliderBuilder::ball(0.5).restitution(1.0).build();
     let ball_body_handle = rigid_body_set.insert(rigid_body);
     collider_set.insert_with_parent(collider, ball_body_handle, &mut rigid_body_set);
 
