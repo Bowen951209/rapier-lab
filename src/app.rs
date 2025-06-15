@@ -1,12 +1,31 @@
-use std::collections::HashMap;
-
 use eframe::egui;
 use rapier2d::{na, prelude::*};
+use std::collections::HashMap;
 
 pub enum SimulationMode {
     Playing,
     Pause,
     StepOneFrame,
+}
+
+pub struct EngineInfo {
+    pub rigid_body_set: RigidBodySet,
+    pub collider_set: ColliderSet,
+    pub physics_pipeline: PhysicsPipeline,
+    pub gravity: na::Vector2<Real>,
+    pub integration_parameters: IntegrationParameters,
+    pub island_manager: IslandManager,
+    pub broad_phase: DefaultBroadPhase,
+    pub narrow_phase: NarrowPhase,
+    pub impulse_joint_set: ImpulseJointSet,
+    pub multibody_joint_set: MultibodyJointSet,
+    pub ccd_solver: CCDSolver,
+    pub query_pipeline: QueryPipeline,
+    pub physics_hooks: (),
+    pub event_handler: (),
+    pub camera: Camera,
+    pub fps_counter: FpsCounter,
+    pub sim_time: f32,
 }
 
 pub struct AppInfo {
@@ -44,23 +63,9 @@ pub struct Camera {
 }
 
 pub struct PhysicsApp {
-    pub rigid_body_set: RigidBodySet,
-    pub collider_set: ColliderSet,
-    pub physics_pipeline: PhysicsPipeline,
-    pub gravity: na::Vector2<Real>,
-    pub integration_parameters: IntegrationParameters,
-    pub island_manager: IslandManager,
-    pub broad_phase: DefaultBroadPhase,
-    pub narrow_phase: NarrowPhase,
-    pub impulse_joint_set: ImpulseJointSet,
-    pub multibody_joint_set: MultibodyJointSet,
-    pub ccd_solver: CCDSolver,
-    pub query_pipeline: QueryPipeline,
-    pub physics_hooks: (),
-    pub event_handler: (),
-    pub camera: Camera,
-    pub fps_counter: FpsCounter,
+    pub engine_info: EngineInfo,
     pub app_info: AppInfo,
+    pub render_extra_ui: Option<Box<dyn FnMut(&EngineInfo, &egui::Context)>>,
 }
 
 impl PhysicsApp {
@@ -71,12 +76,14 @@ impl PhysicsApp {
 
     pub fn world_to_screen_x(&self, x: f32) -> f32 {
         let screen_rect = self.app_info.screen_rect.unwrap();
-        (x + self.camera.center.x) * self.camera.zoom + screen_rect.width() * 0.5
+        let camera = &self.engine_info.camera;
+        (x + camera.center.x) * camera.zoom + screen_rect.width() * 0.5
     }
 
     pub fn world_to_screen_y(&self, y: f32) -> f32 {
         let screen_rect = self.app_info.screen_rect.unwrap();
-        (y + self.camera.center.y) * -self.camera.zoom + screen_rect.height() * 0.5
+        let camera = &self.engine_info.camera;
+        (y + camera.center.y) * -camera.zoom + screen_rect.height() * 0.5
     }
 
     pub fn world_to_screen(&self, p: (f32, f32)) -> egui::Pos2 {
@@ -86,14 +93,15 @@ impl PhysicsApp {
     pub fn screen_to_world(&self, p: egui::Pos2) -> (f32, f32) {
         let (mut x, mut y) = (p.x, p.y);
         let screen_rect = self.app_info.screen_rect.unwrap();
+        let camera = &self.engine_info.camera;
 
         x -= screen_rect.width() * 0.5;
-        x /= self.camera.zoom;
-        x -= self.camera.center.x;
+        x /= camera.zoom;
+        x -= camera.center.x;
 
         y -= screen_rect.height() * 0.5;
-        y /= -self.camera.zoom;
-        y -= self.camera.center.y;
+        y /= -camera.zoom;
+        y -= camera.center.y;
 
         (x, y)
     }
@@ -119,22 +127,24 @@ impl PhysicsApp {
         }
     }
 
-    pub fn step_physics(&mut self) {
-        self.physics_pipeline.step(
-            &self.gravity,
-            &self.integration_parameters,
-            &mut self.island_manager,
-            &mut self.broad_phase,
-            &mut self.narrow_phase,
-            &mut self.rigid_body_set,
-            &mut self.collider_set,
-            &mut self.impulse_joint_set,
-            &mut self.multibody_joint_set,
-            &mut self.ccd_solver,
-            Some(&mut self.query_pipeline),
-            &self.physics_hooks,
-            &self.event_handler,
+    pub fn step_physics(engine_info: &mut EngineInfo) {
+        engine_info.physics_pipeline.step(
+            &engine_info.gravity,
+            &engine_info.integration_parameters,
+            &mut engine_info.island_manager,
+            &mut engine_info.broad_phase,
+            &mut engine_info.narrow_phase,
+            &mut engine_info.rigid_body_set,
+            &mut engine_info.collider_set,
+            &mut engine_info.impulse_joint_set,
+            &mut engine_info.multibody_joint_set,
+            &mut engine_info.ccd_solver,
+            Some(&mut engine_info.query_pipeline),
+            &engine_info.physics_hooks,
+            &engine_info.event_handler,
         );
+
+        engine_info.sim_time += engine_info.integration_parameters.dt;
     }
 
     fn mouse_hover_body(&self, mouse_pos: egui::Pos2) -> Option<RigidBodyHandle> {
@@ -144,13 +154,13 @@ impl PhysicsApp {
 
         let mut body_handle = None;
 
-        self.query_pipeline.intersections_with_point(
-            &self.rigid_body_set,
-            &self.collider_set,
+        self.engine_info.query_pipeline.intersections_with_point(
+            &self.engine_info.rigid_body_set,
+            &self.engine_info.collider_set,
             &world_pos,
             filter,
             |handle| {
-                let collider = self.collider_set.get(handle).unwrap();
+                let collider = self.engine_info.collider_set.get(handle).unwrap();
                 body_handle = collider.parent();
 
                 // We only find first body, return false to stop searching
@@ -163,8 +173,10 @@ impl PhysicsApp {
 
     fn draw_grid(&mut self, painter: &egui::Painter) {
         const GRID_SPACE_FREQ: f32 = 2.0;
-        let grid_spacing_world = 10f32
-            .powf(-GRID_SPACE_FREQ * (self.camera.zoom.log10() - 2.0).round() / GRID_SPACE_FREQ);
+        let grid_spacing_world = 10f32.powf(
+            -GRID_SPACE_FREQ * (self.engine_info.camera.zoom.log10() - 2.0).round()
+                / GRID_SPACE_FREQ,
+        );
         self.app_info.grid_space = Some(grid_spacing_world);
         let screen_rect = self.app_info.screen_rect.unwrap();
 
@@ -239,7 +251,7 @@ impl PhysicsApp {
                 .collapsible(true)
                 .open(is_open)
                 .show(ctx, |ui| {
-                    let body = self.rigid_body_set.get(*body_handle).unwrap();
+                    let body = self.engine_info.rigid_body_set.get(*body_handle).unwrap();
                     ui.label(format!(
                         "Position: ({:.2}, {:.2})",
                         body.translation().x,
@@ -257,7 +269,7 @@ impl PhysicsApp {
                     let colliders = body
                         .colliders()
                         .iter()
-                        .map(|handle| self.collider_set.get(*handle).unwrap())
+                        .map(|handle| self.engine_info.collider_set.get(*handle).unwrap())
                         .collect::<Vec<_>>();
 
                     egui::CollapsingHeader::new("Colliders")
@@ -302,7 +314,7 @@ impl eframe::App for PhysicsApp {
                 input.smooth_scroll_delta.y,
             )
         });
-        self.fps_counter.update_frame(time);
+        self.engine_info.fps_counter.update_frame(time);
         self.app_info.screen_rect = Some(ctx.screen_rect());
         if let Some(mouse_pos) = mouse_pos {
             self.app_info.hovered_body = self.mouse_hover_body(mouse_pos);
@@ -311,19 +323,19 @@ impl eframe::App for PhysicsApp {
         // Zoom the camera when mouse wheel is scrolled.
         // Use a exponetial increment to make it feel more natural.
         const ZOOM_SPEED: f32 = 0.01;
-        self.camera.zoom *= (mouse_scroll_delta * ZOOM_SPEED).exp();
-        if self.camera.zoom < 1.0 {
-            self.camera.zoom = 1.0;
+        self.engine_info.camera.zoom *= (mouse_scroll_delta * ZOOM_SPEED).exp();
+        if self.engine_info.camera.zoom < 1.0 {
+            self.engine_info.camera.zoom = 1.0;
         }
 
         // Step the physics
         let should_update_next_frame = match self.app_info.simulation_mode {
             SimulationMode::Playing => {
-                self.step_physics();
+                PhysicsApp::step_physics(&mut self.engine_info);
                 true
             }
             SimulationMode::StepOneFrame => {
-                self.step_physics();
+                PhysicsApp::step_physics(&mut self.engine_info);
                 self.app_info.simulation_mode = SimulationMode::Pause; // Pause after one frame
                 false
             }
@@ -336,8 +348,8 @@ impl eframe::App for PhysicsApp {
                     "FPS: {}\n\
                     Camera Zoom: x{:.2}\n\
                     Grid Space: {:.2}",
-                    self.fps_counter.fps.unwrap_or(0.0).round(),
-                    self.camera.zoom,
+                    self.engine_info.fps_counter.fps.unwrap_or(0.0).round(),
+                    self.engine_info.camera.zoom,
                     self.app_info.grid_space.unwrap_or(0.0),
                 ));
             }
@@ -352,7 +364,7 @@ impl eframe::App for PhysicsApp {
                 if let Some(last_pos) = self.app_info.last_mouse_pos {
                     let mut delta = mouse_pos.unwrap() - last_pos;
                     delta.y = -delta.y;
-                    self.camera.center += delta / self.camera.zoom;
+                    self.engine_info.camera.center += delta / self.engine_info.camera.zoom;
                 }
 
                 cursor_icon = egui::CursorIcon::Grabbing;
@@ -379,19 +391,23 @@ impl eframe::App for PhysicsApp {
                 self.draw_grid(painter);
             }
 
-            for (_body_handle, body) in self.rigid_body_set.iter() {
+            for (_body_handle, body) in self.engine_info.rigid_body_set.iter() {
                 if body.colliders().len() > 1 {
                     panic!("Multiple colliders per body not supported");
                 }
 
-                let collider = self.collider_set.get(body.colliders()[0]).unwrap();
+                let collider = self
+                    .engine_info
+                    .collider_set
+                    .get(body.colliders()[0])
+                    .unwrap();
                 let shape = collider.shape().as_typed_shape();
                 let position = collider.position();
                 let center = self.world_to_screen((position.translation.x, position.translation.y));
 
                 match shape {
                     TypedShape::Ball(ball) => {
-                        let radius = ball.radius * self.camera.zoom;
+                        let radius = ball.radius * self.engine_info.camera.zoom;
                         painter.circle(center, radius, egui::Color32::BLUE, egui::Stroke::NONE);
 
                         let line_end = position * point![ball.radius, 0.0];
@@ -433,6 +449,10 @@ impl eframe::App for PhysicsApp {
         });
 
         self.draw_windows(ctx);
+
+        if let Some(render_extra_ui) = &mut self.render_extra_ui {
+            render_extra_ui(&self.engine_info, ctx);
+        }
 
         self.app_info.last_mouse_pos = mouse_pos;
 

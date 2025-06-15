@@ -1,9 +1,10 @@
 mod app;
 
-use eframe::egui::Pos2;
+use eframe::egui::{self, Pos2};
+use egui_plot::{Line, Plot, PlotPoint};
 use rapier2d::prelude::*;
 
-use crate::app::{AppInfo, Camera, FpsCounter, PhysicsApp};
+use crate::app::{AppInfo, Camera, EngineInfo, FpsCounter, PhysicsApp};
 
 fn main() {
     let mut rigid_body_set = RigidBodySet::new();
@@ -30,7 +31,7 @@ fn main() {
         zoom: 100.0,
     };
 
-    let app = PhysicsApp {
+    let engine_info = EngineInfo {
         rigid_body_set,
         collider_set,
         camera,
@@ -46,8 +47,33 @@ fn main() {
         query_pipeline: QueryPipeline::new(),
         physics_hooks: (),
         event_handler: (),
-        app_info: AppInfo::default(),
         fps_counter: FpsCounter::default(),
+        sim_time: 0.0,
+    };
+
+    let mut points = Vec::new();
+    let render_extra_ui: Box<dyn for<'a, 'b> FnMut(&'a EngineInfo, &'b egui::Context)> =
+        Box::new(move |engine_info: &EngineInfo, ctx| {
+            egui::Window::new("Plot").show(ctx, |ui| {
+                let body = engine_info
+                    .rigid_body_set
+                    .iter()
+                    .map(|(_, body)| body)
+                    .collect::<Vec<_>>()[1];
+
+                let point = PlotPoint::new(engine_info.sim_time, body.linvel().magnitude());
+                points.push(point);
+
+                Plot::new("v-t plot").show(ui, |plot_ui| {
+                    plot_ui.line(Line::new("a", points.as_slice()));
+                });
+            });
+        });
+
+    let app = PhysicsApp {
+        engine_info,
+        app_info: AppInfo::default(),
+        render_extra_ui: Some(render_extra_ui),
     };
 
     app.run("Rapier Lab").expect("Failed to run the frame");
