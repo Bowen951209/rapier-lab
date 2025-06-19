@@ -1,7 +1,7 @@
-use rapier_lab::app_ball_and_cuboid;
+use rapier_lab::get_app_by_env_args;
 
 fn main() {
-    app_ball_and_cuboid()
+    get_app_by_env_args()
         .run("Ball and Cuboid")
         .expect("Failed to run the frame");
 }

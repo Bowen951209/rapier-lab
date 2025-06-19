@@ -65,7 +65,7 @@ pub struct Camera {
 pub struct PhysicsApp {
     pub engine_info: EngineInfo,
     pub app_info: AppInfo,
-    pub render_extra_ui: Option<Box<dyn FnMut(&EngineInfo, &egui::Context)>>,
+    pub extra_updates: Option<Box<dyn FnMut(&mut EngineInfo, &egui::Context)>>,
 }
 
 impl PhysicsApp {
@@ -127,24 +127,24 @@ impl PhysicsApp {
         }
     }
 
-    pub fn step_physics(engine_info: &mut EngineInfo) {
-        engine_info.physics_pipeline.step(
-            &engine_info.gravity,
-            &engine_info.integration_parameters,
-            &mut engine_info.island_manager,
-            &mut engine_info.broad_phase,
-            &mut engine_info.narrow_phase,
-            &mut engine_info.rigid_body_set,
-            &mut engine_info.collider_set,
-            &mut engine_info.impulse_joint_set,
-            &mut engine_info.multibody_joint_set,
-            &mut engine_info.ccd_solver,
-            Some(&mut engine_info.query_pipeline),
-            &engine_info.physics_hooks,
-            &engine_info.event_handler,
+    pub fn step_physics(&mut self) {
+        self.engine_info.physics_pipeline.step(
+            &self.engine_info.gravity,
+            &self.engine_info.integration_parameters,
+            &mut self.engine_info.island_manager,
+            &mut self.engine_info.broad_phase,
+            &mut self.engine_info.narrow_phase,
+            &mut self.engine_info.rigid_body_set,
+            &mut self.engine_info.collider_set,
+            &mut self.engine_info.impulse_joint_set,
+            &mut self.engine_info.multibody_joint_set,
+            &mut self.engine_info.ccd_solver,
+            Some(&mut self.engine_info.query_pipeline),
+            &self.engine_info.physics_hooks,
+            &self.engine_info.event_handler,
         );
 
-        engine_info.sim_time += engine_info.integration_parameters.dt;
+        self.engine_info.sim_time += self.engine_info.integration_parameters.dt;
     }
 
     fn mouse_hover_body(&self, mouse_pos: egui::Pos2) -> Option<RigidBodyHandle> {
@@ -265,6 +265,7 @@ impl PhysicsApp {
                         body.linvel().y,
                         body.linvel().magnitude()
                     ));
+                    ui.label(format!("Angular Velocity: {}", body.angvel()));
 
                     let colliders = body
                         .colliders()
@@ -331,11 +332,11 @@ impl eframe::App for PhysicsApp {
         // Step the physics
         let should_update_next_frame = match self.app_info.simulation_mode {
             SimulationMode::Playing => {
-                PhysicsApp::step_physics(&mut self.engine_info);
+                self.step_physics();
                 true
             }
             SimulationMode::StepOneFrame => {
-                PhysicsApp::step_physics(&mut self.engine_info);
+                self.step_physics();
                 self.app_info.simulation_mode = SimulationMode::Pause; // Pause after one frame
                 false
             }
@@ -392,6 +393,11 @@ impl eframe::App for PhysicsApp {
             }
 
             for (_body_handle, body) in self.engine_info.rigid_body_set.iter() {
+                if body.colliders().len() == 0 {
+                    // No colliders, skip drawing
+                    continue;
+                }
+
                 if body.colliders().len() > 1 {
                     panic!("Multiple colliders per body not supported");
                 }
@@ -450,8 +456,8 @@ impl eframe::App for PhysicsApp {
 
         self.draw_windows(ctx);
 
-        if let Some(render_extra_ui) = &mut self.render_extra_ui {
-            render_extra_ui(&self.engine_info, ctx);
+        if let Some(extra_updates) = &mut self.extra_updates {
+            extra_updates(&mut self.engine_info, ctx);
         }
 
         self.app_info.last_mouse_pos = mouse_pos;
