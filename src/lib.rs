@@ -85,15 +85,24 @@ fn app_ball_and_cuboid() -> PhysicsApp {
                     .map(|(_, body)| body)
                     .collect::<Vec<_>>()[1];
 
-                let point = PlotPoint::new(engine_info.sim_time, body.linvel().magnitude());
-                points.push(point);
-
                 Plot::new("v-t plot")
                     .x_axis_label("t")
                     .y_axis_label("v")
                     .show(ui, |plot_ui| {
                         plot_ui.line(Line::new("line", points.as_slice()));
                     });
+
+                if let Some(last) = points.last() {
+                    if last.x as f32 == engine_info.sim_time {
+                        // don't push duplicates
+                        return;
+                    }
+                }
+
+                points.push(PlotPoint::new(
+                    engine_info.sim_time,
+                    body.linvel().magnitude(),
+                ));
             });
         });
 
