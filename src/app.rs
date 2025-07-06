@@ -447,6 +447,12 @@ impl eframe::App for PhysicsApp {
                             egui::Stroke::new(1.0, egui::Color32::WHITE),
                         );
                     }
+                    TypedShape::Segment(segment) => {
+                        let a = self.world_to_screen((segment.a.x, segment.a.y));
+                        let b = self.world_to_screen((segment.b.x, segment.b.y));
+                        let stroke = egui::Stroke::new(3.0, egui::Color32::BLUE);
+                        painter.line_segment([a, b], stroke);
+                    }
                     _ => {
                         panic!("Unsupported shape");
                     }

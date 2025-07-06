@@ -12,6 +12,7 @@ pub fn get_app_by_env_args() -> PhysicsApp {
     match app_id_from_env_args() {
         0 => app_ball_and_cuboid(),
         1 => app_bat_hitting_ball(),
+        2 => app_pi_collision(),
         _ => panic!("Unknown app id"),
     }
 }
@@ -315,6 +316,124 @@ fn app_bat_hitting_ball() -> PhysicsApp {
         island_manager: IslandManager::new(),
         broad_phase: DefaultBroadPhase::new(),
         narrow_phase: NarrowPhase::new(),
+        multibody_joint_set: MultibodyJointSet::new(),
+        ccd_solver: CCDSolver::new(),
+        query_pipeline: QueryPipeline::new(),
+        physics_hooks: (),
+        event_handler: (),
+        fps_counter: FpsCounter::default(),
+        sim_time: 0.0,
+    };
+
+    PhysicsApp {
+        engine_info,
+        app_info: AppInfo::default(),
+        extra_updates: Some(extra_updates),
+    }
+}
+
+/// This scene contains two blocks and a wall collliding. In theory, this yields a collision number related to pi.
+/// But the result is not correct probably due to the numerical error in the solver.
+fn app_pi_collision() -> PhysicsApp {
+    let mut rigid_body_set = RigidBodySet::new();
+    let mut collider_set = ColliderSet::new();
+
+    let smaller_mass = 1.0;
+    let bigger_mass = 10.0;
+    let smaller_size = 1.0;
+    let bigger_size = 1.0;
+
+    /* Create the ground */
+    let rigid_body = RigidBodyBuilder::fixed().build();
+    let collider = ColliderBuilder::segment(point![-1000.0, 0.0], point![1000.0, 0.0])
+        .restitution(1.0)
+        .friction(0.0)
+        .build();
+    let rigid_body_handle = rigid_body_set.insert(rigid_body);
+    collider_set.insert_with_parent(collider, rigid_body_handle, &mut rigid_body_set);
+
+    /*Create the wall */
+    let rigid_body = RigidBodyBuilder::fixed()
+        .translation(vector![4.5, 500.0])
+        .can_sleep(false)
+        .build();
+    let collider = ColliderBuilder::cuboid(1.0, 1000.0)
+        .restitution(1.0)
+        .friction(0.0)
+        .build();
+    let rigid_body_handle = rigid_body_set.insert(rigid_body);
+    collider_set.insert_with_parent(collider, rigid_body_handle, &mut rigid_body_set);
+
+    /* Create m block */
+    let rigid_body = RigidBodyBuilder::dynamic()
+        .translation(vector![2.0, smaller_size / 2.0])
+        .can_sleep(false)
+        .build();
+    let collider = ColliderBuilder::cuboid(smaller_size / 2.0, smaller_size / 2.0)
+        .restitution(1.0)
+        .friction(0.0)
+        .mass(smaller_mass)
+        .build();
+    let rigid_body_handle = rigid_body_set.insert(rigid_body);
+    collider_set.insert_with_parent(collider, rigid_body_handle, &mut rigid_body_set);
+
+    /* Create M block */
+    let mut rigid_body = RigidBodyBuilder::dynamic()
+        .translation(vector![0.0, bigger_size / 2.0])
+        .build();
+    rigid_body.set_linvel(vector![1.0, 0.0], true);
+    let collider = ColliderBuilder::cuboid(bigger_size / 2.0, bigger_size / 2.0)
+        .restitution(1.0)
+        .friction(0.0)
+        .mass(bigger_mass)
+        .build();
+    let rigid_body_handle = rigid_body_set.insert(rigid_body);
+    collider_set.insert_with_parent(collider, rigid_body_handle, &mut rigid_body_set);
+
+    let mut points = Vec::new();
+    let extra_updates: Box<dyn for<'a, 'b> FnMut(&'a mut EngineInfo, &'b egui::Context)> =
+        Box::new(move |engine_info, ctx| {
+            egui::Window::new("Ek-t plot").show(ctx, |ui| {
+                let kinetic_energy: f32 = engine_info
+                    .rigid_body_set
+                    .iter()
+                    .map(|(_, body)| body.kinetic_energy())
+                    .sum();
+
+                Plot::new("v-t plot")
+                    .x_axis_label("t")
+                    .y_axis_label("v")
+                    .show(ui, |plot_ui| {
+                        plot_ui.line(Line::new("line", points.as_slice()));
+                    });
+
+                if let Some(last) = points.last() {
+                    if last.x as f32 == engine_info.sim_time {
+                        // don't push duplicates
+                        return;
+                    }
+                }
+
+                points.push(PlotPoint::new(engine_info.sim_time, kinetic_energy));
+            });
+        });
+
+    let camera = Camera {
+        center: Pos2::new(0.0, 0.0),
+        zoom: 100.0,
+    };
+
+    let engine_info = EngineInfo {
+        rigid_body_set,
+        collider_set,
+        camera,
+        physics_pipeline: PhysicsPipeline::new(),
+        gravity: vector![0.0, -10.0], // adding gravity makes the system more stable
+        integration_parameters: IntegrationParameters::default(),
+        island_manager: IslandManager::new(),
+        broad_phase: DefaultBroadPhase::new(),
+        narrow_phase: NarrowPhase::new(),
+        impulse_joint_set: ImpulseJointSet::new(),
         multibody_joint_set: MultibodyJointSet::new(),
         ccd_solver: CCDSolver::new(),
         query_pipeline: QueryPipeline::new(),
